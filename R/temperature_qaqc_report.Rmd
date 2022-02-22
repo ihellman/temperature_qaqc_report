@@ -29,9 +29,9 @@ here::i_am("scripts/temperature_qaqc_report.Rmd")
   #           workingBasin = 2 letter, lower case abbreviation for basin (e.g. "tw" or "sn")
   #           filePath = path to the workingBasion's CSV files for that doanload period (spring or fall)
   #           stationKeyLoc = location of key with current station and serial number relationship  
-  workingBasin <- "FE"
-  filePath <- here("data_input/temperature")
-  stationKeyLoc <- here("metadata/temperature_logger_serial_lookup.csv")
+  #workingBasin <- "FE"
+  #filePath <- here("data_input/temperature")
+  #stationKeyLoc <- here("metadata/temperature_logger_serial_lookup.csv")
 ```
 
 
