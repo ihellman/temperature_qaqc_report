@@ -33,7 +33,7 @@ if (!dir.exists(reportDir)){
 
 for(workingBasin in basinNames){  
 rmarkdown::render(here("scripts/temperature_qaqc_report.Rmd"),
-                  output_file = paste("report_", workingBasin, ".html", sep = ""),
+                  output_file = paste(workingBasin, "-temperature_QA_ADDSEASON_ADDYEAR",".html", sep = ""),
                   output_dir = here("data_output/QA_Graphs"))
 }
 
