@@ -18,35 +18,27 @@ output:
 # Load Libraries
 library(tidyverse)
 library(lubridate)
+library(readxl)
 library(plotly)
 library(here)
 
-# Set local location of this file. 
-here::i_am("scripts/temperature_QA_report_iterator_V3.Rmd")
+here::i_am("scripts/temperature_qaqc_report.Rmd")
 
-##### REQUIRED INPUTS (if not using iterating through all basins) ----------------------------------------------------
-# Define required inputs:
-  #   workingBasin = 2 letter, lower case abbreviation for basin (e.g. "tw" or "sn")
-  #   filePath = path to the workingBasion's CSV files for that doanload period (spring or fall)
-  #   stationKeyLoc = location of key with current station and serial number relationship  
-
-# Actually asign values if using this report as a stand-alone.
-  #workingBasin <- "FE"
-  #filePath <- here("data_input/csv_data_files")
-  #stationKeyLoc <- here("metadata/temperature_logger_serial_lookup.csv")
+##### REQUIRED INPUTS (only if not  iterating through all basins with temperature_QA_report_iterator.R) ----
+  # !!! Set:
+  #           workingBasin = 2 letter, lower case abbreviation for basin (e.g. "tw" or "sn")
+  #           filePath = path to the workingBasion's CSV files for that doanload period (spring or fall)
+  #           stationKeyLoc = location of key with current station and serial number relationship  
+  workingBasin <- "FE"
+  filePath <- here("data_input/temperature")
+  stationKeyLoc <- here("metadata/temperature_logger_serial_lookup.csv")
 ```
 
 
 ```{r, get file list, echo = FALSE, include = TRUE, warning = FALSE, message = FALSE, code_folding = TRUE}
-## Only ingest data files that match the desired working basin
-
-# Get list of serial numbers within the current workingBasin
-  serialNumsInWorkingBasin <- read_csv(stationKeyLoc) %>% filter(basin_name_abrv == workingBasin) %>% pull(serial) %>% as.character()
-
-# Get list of files in working directory. Then filter to only include the files in the current working basin. NOTE: CURRENTLY RECUSSIVE ***
-  files <- list.files(path = filePath, pattern = "*.csv", include.dirs = FALSE, full.names = TRUE, recursive = TRUE) %>%
-            str_subset(str_c(serialNumsInWorkingBasin, collapse = "|"))
-  #files <- files[1:5] #for diagnostics
+# Get list of files in working directory. NOTE: CURRENTLY RECUSSIVE ***
+    files <- list.files(path = filePath, pattern = "*.csv", include.dirs = FALSE, full.names = TRUE, recursive = TRUE)
+    #files <- files[1:5] #for diagnostics
 ```
 
 ```{r, import function, echo = FALSE, include = TRUE, warning = FALSE, message = FALSE, code_folding = TRUE}
@@ -59,27 +51,26 @@ here::i_am("scripts/temperature_QA_report_iterator_V3.Rmd")
       # Extract time zone from header and create new column with this value
       csvData[,4] <- gsub("Date Time, GMT", "", colnames(csvData)[2])
       
-      # Select the pertinent columns.  This gets rid of the shuttle connect/disconnect fields
+      # Select the pertinant columns.  This gets rid of the shuttle connect/disconnect fields
       csvData <- csvData[,2:4]
       
       # Rename columnns
       names(csvData) <- c("DateTimeRaw", "TempC", "OrigUTCoffset")
       
-      # Change input dates from strings to dates and turn all input dates to UTC and UTC-8.
-        # This accounts for sensors deployed with different time zone settings (UTC-7 and UTC-8).  
-        # This may be more clear as an if/then statement.  
+      # Change input dates from strings to dates and turn all input dates to UTC and UTC-8.  
       csvData <- csvData %>%
         mutate(DateTimeRaw = ymd_hms(DateTimeRaw, truncated = 1)) %>%
         mutate(DateTimeUTC = DateTimeRaw - hm(OrigUTCoffset)) %>% # "-" used here because offset value is negative
         mutate(DateTimePST = DateTimeUTC - hm("08:00")) %>%
         select(DateTimePST, TempC)
       
-      # Add serial number column based on the filename.
+      # Add serial number column based on the filename.  Why is regex so rediculous?
        csvData$serial <- fileName %>% 
         basename() %>%
         str_replace_all(., c(".csv" = "", "_[^_]+$" = "", ".*/" = "")) # This removes .csv file extension and the "_0" from file names if present.
       
       # Return csvData to be put into a list of all data
+      #print(fileName)
       return(csvData)
     }
 ```
@@ -92,20 +83,22 @@ here::i_am("scripts/temperature_QA_report_iterator_V3.Rmd")
       basename() %>%
       str_replace_all(., c(".csv" = "", "_[^_]+$" = "", ".*/" = "")) # This removes .csv file extension and the "_0" from file names if present.
 
+    
 ### CREATE LONG DATA FILE  ------------------------------------------------------------------------------------------   
   
     # Flatten data into single dataframe and remove rows with NA values that stem from shuttle connect/disconnect logs.  
     tdataLong <- bind_rows(tdata) %>% drop_na()
  
+     
 
 ```
 
 ```{r, join with key, echo = FALSE, include = TRUE, warning = FALSE, message = FALSE, code_folding = TRUE}
 
-###  USE "KEY" TO ASSIGN PROPER STATION NAMES  ------------------------------------------------------------------------  
+###  USE KEY TO ASSIGN PROPER STATION NAMES  ------------------------------------------------------------------------  
 
 # Bring in key.
-  key <- read_csv(stationKeyLoc, col_types = "cccccc") # set all input variables to character
+  key <- read_csv(stationKeyLoc, col_types = "cccccc") # set all input variables to character (c)
   
 # Join key and data to relate raw serial numbers to actual field stations.
   allTempSensors <- inner_join(tdataLong, key, by = "serial")
@@ -120,9 +113,14 @@ here::i_am("scripts/temperature_QA_report_iterator_V3.Rmd")
 
 ```{r, export csvs, echo = FALSE, include = TRUE, warning = FALSE, message = FALSE, code_folding = TRUE}
 
-outputDir <- here("data_output/cleaned_csvs/")
-  dir.create(outputDir)
+# Export cleaned csv files
+  outputDir <- here("data_output/cleaned_csvs", workingBasin)
   
+  # check if output dir exists.  If not, make it.
+  if (!dir.exists(outputDir)){
+    dir.create(outputDir, recursive = TRUE)
+  }
+    
   SensorIDNames <- allTempSensors %>%
     filter(basin_name_abrv == workingBasin) %>%
     distinct_at(., vars(SensorID)) %>%
@@ -132,13 +130,13 @@ outputDir <- here("data_output/cleaned_csvs/")
     allTempSensors %>%
       filter(SensorID == SensorIDNames[i] & basin_name_abrv == workingBasin) %>%
       arrange(DateTimePST) %>% # Need to explicitly sort by time to account for rbinding multiple csvs from same sensor.
-      write.csv(., paste(outputDir,SensorIDNames[i],".csv", sep = ""), row.names = FALSE) #write.csv does NOT keep the time zone info like write_csv does
+      write.csv(., paste(outputDir, "/", SensorIDNames[i],".csv", sep = ""), row.names = FALSE) #write.csv does NOT keep the time zone info like write_csv does (this is a good thing)
   }
 ```
 
 ```{r, plotting prep, echo = FALSE, include = TRUE, warning = FALSE, message = FALSE, code_folding = TRUE}
 
-# # All stations in one plot, faceted by station.  Not especially useful but leaving just in case.
+# # All stations in one plot, faceted by station.  Not especially useful.
 # basinFacet <- function(basinAbbrev) {
 #     allTempSensors %>%
 #       filter(basin_name_abrv == basinAbbrev) %>%
@@ -160,13 +158,13 @@ outputDir <- here("data_output/cleaned_csvs/")
 # }
 
 
-# An iteractive (zoomable, scrollable, etc) plot of an individual station.  Used to
-# create plots for all stations via purrr:map()
+
+# An iteractive (zoomable, scrollable, etc) plot of an individual station.  
 singleStation <- function(basinAbbrev, StationName) {
   p <- allTempSensors %>%
       filter(basin_name_abrv == basinAbbrev & StationID == StationName) %>%
 
-      # Change sensor factors.  This is just for order of plotting so that air is on bottom
+      # Change sensor factors.  This is soley for order of plotting so that air is on bottom
       # air = air; sw = surface water; sub = ground water
       mutate_at("SensorMedium", ~factor(`SensorMedium`)) %>%
       mutate_at("SensorMedium", ~fct_relevel(., "air", "sw", "sub")) %>%
@@ -182,7 +180,9 @@ singleStation <- function(basinAbbrev, StationName) {
   ggplotly(p, height = 800, width = 1500, dynamicTicks = TRUE)
 }
 
-# # Same as 'singleStation' above but in native plotly.  Leaving just in case.  
+
+
+# # Same as 'singleStation' above but in native plotly.  
 # ### NOTE:  Browsers limit the amount of WebGl "contexts" to ~8 or so.  Therefore, usuing type = scattergl 
 # #          is limited to only 8 plots.  ugh. 
 # single_station_plotly_native <- function(basinAbbrev, StationName){
@@ -215,8 +215,7 @@ singleStation <- function(basinAbbrev, StationName) {
 #     )
 # }  
   
-
-# All stations within a basin (plotting function).
+# All stations within a basin.
   # basinAbbrev = 2 character basin ID set at top of script
   # medium = temperature location (e.g. "sw", "air", or "sub")
   allStationsOneBasin <- function(basinAbbrev, medium) {
@@ -227,7 +226,7 @@ singleStation <- function(basinAbbrev, StationName) {
         theme_bw()
   }  
   
-# Raster plot showing all surface water (sw) sensors at all stations (plotting function).
+# Raster plot showing all surface water (sw) sensors at all stations.
   allStationRaster <- function(basinAbbrev, SensorMedium){
                         allTempSensors %>%
                         filter(basin_name_abrv == basinAbbrev & SensorMedium == "sw") %>% 
