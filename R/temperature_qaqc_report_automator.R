@@ -4,7 +4,7 @@ library(markdown)
 library(rmarkdown)
 library(here)
 
-here::i_am("scripts/temperature_qaqc_report_iterator.R")
+here::i_am("scripts/temperature_qaqc_report_automator.R")
 
 # Location of CSV files. Currently, this is recursive so files may be in sub directory structure (e.g. BN, BS, SN, etc)
 filePath <- here("data_input/temperature")
